@@ -17,9 +17,9 @@ def f(x, y, I, dG, dIP3, diff, params):
     h_ = params["a2"]*(params["d2"]*(1 - y[2])*(y[0] + params["d1"])/(y[0] + params["d3"]) - y[1]*y[2])
     return jnp.stack([v_, u_, g_]), jnp.stack([ip3_, ca_, h_])
 
-def timestep(x, y, R, I_applied, firing_patterns, params):
+def timestep(x, y, R, I_applied, firing_patterns, params, integrator="rk4"):
     # reset
-    fired = x[0] >= 30
+    fired = x[0] >= params["fire_threshold"]
     v = x[0] * (1 - fired) + params["c"] * fired
     u = x[1] * (1 - fired) + (x[1] + params["d"]) * fired
     x = jnp.stack([v, u, x[2]])
@@ -32,13 +32,15 @@ def timestep(x, y, R, I_applied, firing_patterns, params):
     active_astrocytes = jnp.zeros((R.shape[1],))
     active_astrocytes = active_astrocytes.at[params["ind_tripartite"]].add(active_glutamate[params["ind_neurons"][:, 1]]) / params["synapse_counter"]
     active_astrocytes = active_astrocytes >= params["F_active"]
-    R = R.at[0].set(R[0] + active_astrocytes * (R[0] == 0) * params["t_glutamate"])
+    R = R.at[0].set(R[0] + active_astrocytes * (R[0] == 0) * params["t_glutamate"]) 
+    R = R.at[0].set(jnp.maximum(R[0], active_astrocytes * params["t_glutamate"])) # if astocyte is active, restart counter
 
     # detect Ca event
     active_astrocytes = jnp.zeros((R.shape[1],))
     active_astrocytes = active_astrocytes.at[params["ind_tripartite"]].add(jnp.sum(firing_patterns[:, 1:], axis=0)[params["ind_neurons"][:, 1]]) / params["synapse_counter"]
     active_astrocytes = active_astrocytes >= params["F_astrocyte"]
     R = R.at[1].set(R[1] + active_astrocytes * (R[1] == 0) * params["t_astrocyte"])
+    R = R.at[1].set(jnp.maximum(R[1], active_astrocytes * params["t_astrocyte"])) # if astrocyte is active, restart counter
 
     # glutamate IP3 interaction and weight modification
     dIP3 = (R[0] > 0) * params["A_glutamate"]
@@ -56,19 +58,24 @@ def timestep(x, y, R, I_applied, firing_patterns, params):
     diff = diff.at[:, params["ind_astrocytes"][:, 0]].add(y[:2, params["ind_astrocytes"][:, 1]]*params["w_diff"])
 
     # rk4
-    k1, k1_ = f(x, y, I, dG, dIP3, diff, params)
-    k2, k2_ = f(x + params['h']*k1/2, y + params['h']*k1_/2, I/2, dG/2, dIP3/2, diff/2, params)
-    k3, k3_ = f(x + params['h']*k2/2, y + params['h']*k2_/2, I/2, dG/2, dIP3/2, diff/2, params)
-    k4, k4_ = f(x + params['h']*k3, y + params['h']*k3_, I, dG, dIP3, diff, params)
-    x = x + params['h']*(k1 + 2*k2 + 2*k3 + k4) / 6
-    y = y + params['h']*(k1_ + 2*k2_ + 2*k3_ + k4_) / 6
+    if integrator == "rk4":
+        k1, k1_ = f(x, y, I, dG, dIP3, diff, params)
+        k2, k2_ = f(x + params['h']*k1/2, y + params['h']*k1_/2, I, dG, dIP3, diff, params)
+        k3, k3_ = f(x + params['h']*k2/2, y + params['h']*k2_/2, I, dG, dIP3, diff, params)
+        k4, k4_ = f(x + params['h']*k3, y + params['h']*k3_, I, dG, dIP3, diff, params)
+        x = x + params['h']*(k1 + 2*k2 + 2*k3 + k4) / 6
+        y = y + params['h']*(k1_ + 2*k2_ + 2*k3_ + k4_) / 6
+    else:
+        k1, k1_ = f(x, y, I, dG, dIP3, diff, params)
+        x = x + params['h'] * k1
+        y = y + params['h'] * k1_
     
     return x, y, R, fired
 
-def integrate_scan(carry, ind_, I_applied):
+def integrate_scan(carry, ind_, I_applied, integrator="rk4"):
     params, firing_patterns, t, x, y, R, x_neurons = carry
     I_applied_ = I_applied(x, y, R, firing_patterns, t, ind_, params) # external control
-    x, y, R, fired = timestep(x, y, R, I_applied_, firing_patterns, params)
+    x, y, R, fired = timestep(x, y, R, I_applied_, firing_patterns, params, integrator=integrator)
     # tracking neurons that fired for last firing_patterns.shape[0] integration steps
     firing_patterns = firing_patterns.at[ind_ % firing_patterns.shape[0]].set(jnp.concatenate([t[ind_].reshape(1,), fired]))
     return [params, firing_patterns, t, x, y, R, x_neurons], [x, y, R, firing_patterns]
