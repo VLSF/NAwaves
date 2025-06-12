@@ -17,13 +17,14 @@ def get_standard_params(connectivity, ind_tripartite, diff_connectivity, w_diff,
     b = jnp.ones((N_neurons,))*0.2
     c = jnp.array([-65.0,]*N_neurons)
     d = jnp.array([2.0,]*N_neurons)
+    fire_threshold = jnp.array([30.0,]*N_neurons)
     E_synaptic = jnp.array([0.0,])
     k_synaptic = jnp.array([0.2,])
     alpha_glutamate = jnp.array([10.0,]) * 1e-3
     k_glutamate = jnp.array([600.0,]) * 1e-3
     A_glutamate = jnp.array([5.0,]) * 1e-3
     t_glutamate = jnp.array([60.0,])
-    F_active = jnp.array([0.1,])
+    F_active = jnp.array([0.5,])
     G_threshold = jnp.array([0.1,])
     IP_3_star = jnp.array([0.16, ])
     tau_IP_3 = jnp.array([7.14,]) * 1e3
@@ -65,6 +66,7 @@ def get_standard_params(connectivity, ind_tripartite, diff_connectivity, w_diff,
         "b": b,
         "c": c,
         "d": d,
+        "fire_threshold": fire_threshold,
         "h": h,
         "E_synaptic": E_synaptic,
         "k_synaptic": k_synaptic,
